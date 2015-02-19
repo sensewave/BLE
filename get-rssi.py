@@ -19,6 +19,9 @@ import sys
 import struct
 import bluetooth._bluetooth as bluez
 
+# I'll have to rewrite every print call
+# from __future__ import print_function
+
 LE_META_EVENT = 0x3e
 LE_PUBLIC_ADDRESS=0x00
 LE_RANDOM_ADDRESS=0x01
@@ -111,7 +114,7 @@ def hci_le_set_scan_parameters(sock):
     print "sent scan parameters command"
 
 
-def parse_events(sock, loop_count=100):
+def parse_events(sock, loop_count=100000):
     old_filter = sock.getsockopt( bluez.SOL_HCI, bluez.HCI_FILTER, 14)
 
     # perform a device inquiry on bluetooth device #0
@@ -123,11 +126,12 @@ def parse_events(sock, loop_count=100):
     bluez.hci_filter_set_ptype(flt, bluez.HCI_EVENT_PKT)
     sock.setsockopt( bluez.SOL_HCI, bluez.HCI_FILTER, flt )
     done = False
+    #ofile = open(sys.stdout, "w+");
+    ofile = open("rssi.log","w+");
     results = []
     for i in range(0, loop_count):
         pkt = sock.recv(255)
         ptype, event, plen = struct.unpack("BBB", pkt[:3])
-        print "-------------- ptype: 0x%02x event: 0x%02x plen: 0x%02x" % (ptype, event, plen)
         if event == bluez.EVT_INQUIRY_RESULT_WITH_RSSI:
             pkt = pkt[3:]
             nrsp = struct.unpack("B", pkt[0])[0]
@@ -154,46 +158,24 @@ def parse_events(sock, loop_count=100):
         elif event == LE_META_EVENT:
             subevent, = struct.unpack("B", pkt[3])
             pkt = pkt[4:]
-            print "LE META EVENT subevent: 0x%02x" %(subevent,)
+            print ".",
+            sys.stdout.flush();
             if subevent == EVT_LE_CONN_COMPLETE:
-                print "connection complete"
                 le_handle_connection_complete(pkt)
             elif subevent == EVT_LE_ADVERTISING_REPORT:
-                print "advertising report"
                 num_reports = struct.unpack("B", pkt[0])[0]
                 report_pkt_offset = 0
-                print "Number of reports in the report: 0x%02x" % num_reports
                 for i in range(0, num_reports):
-                    print "report", i
                     report_event_type = struct.unpack("B", pkt[report_pkt_offset + 1])[0]
                     bdaddr_type = struct.unpack("B", pkt[report_pkt_offset + 2])[0]
-                    print "\tadvertising report event type: 0x%02x" % report_event_type
-                    print "\tbdaddr type: 0x%02x" % (bdaddr_type,)
-                    print "\tdevice address: ", packed_bdaddr_to_string(pkt[report_pkt_offset + 3:report_pkt_offset + 9])
+                    ofile.write(packed_bdaddr_to_string(pkt[report_pkt_offset + 3:report_pkt_offset + 9]))
                     report_data_length, = struct.unpack("B", pkt[report_pkt_offset + 9])
-                    print "\tadvertising packet metadata length: ", report_data_length
-                    if report_event_type == ADV_IND:
-                        print "\tADV_IND"
-                    elif report_event_type == ADV_DIRECT_IND:
-                        print "\tADV_DIRECT_IND"
-                    elif report_event_type == ADV_SCAN_IND:
-                        print "\tADV_SCAN_IND"
-                    elif report_event_type == ADV_NONCONN_IND:
-                        print "\tADV_NONCONN_IND"
-                    elif report_event_type == ADV_SCAN_RSP:
-                        print "\tADV_SCAN_RSP"
-                        local_name_len, = struct.unpack("B", pkt[report_pkt_offset + 11])
-                        name = pkt[report_pkt_offset + 12:report_pkt_offset + 12+local_name_len]
-                        print "\tname:", name 
-                    else:
-                        print "\tUnknown or reserved event type"
 
                     # each report is 2 (event type, bdaddr type) + 6 (the address)
                     #    + 1 (data length field) + data length + 1 (rssi)
                     report_pkt_offset = report_pkt_offset +  10 + report_data_length + 1
                     rssi, = struct.unpack("b", pkt[report_pkt_offset -1])
-
-                    print "\tRSSI:", rssi
+                    ofile.write("\t" + str(rssi) + "\n");
     
             elif subevent == EVT_LE_CONN_UPDATE_COMPLETE:
                 print "connection updated"
@@ -208,8 +190,8 @@ def parse_events(sock, loop_count=100):
         elif event == bluez.EVT_CMD_STATUS:
             status, ncmd, opcode = struct.unpack("<BBH", pkt[3:7])
             if status != 0:
-                print "uh oh..."
-                printpacket(pkt[3:7])
+                #print "uh oh..."
+                #printpacket(pkt[3:7])
                 done = True
         elif event == bluez.EVT_INQUIRY_RESULT:
             pkt = pkt[3:]
